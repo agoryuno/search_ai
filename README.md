@@ -1,4 +1,4 @@
-> :warning: **Running this model requires an OpenAI API token**. Store in the file `search_ai/config.ini`
+> :warning: **Running this model requires an OpenAI API token**. Store it in the file `search_ai/config.ini`
 
 ## Description
 
