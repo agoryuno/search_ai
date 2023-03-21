@@ -19,8 +19,8 @@ if the current date is 2023-03-20, the model should (ideally) return "2023-03-13
 I wanted to see if and how OpenAI Embeddings could be used to distill a specialized model. Overall, the Embeddings API model is perfectly usable
 for that purpose with some caveats.
 
-In particular, the initital hypothesis
-that inserting a simple date stamp into the embedded query, e.g. "<2023-03-20>", would be sufficient to make the embedding model "figure it out", was
+In particular, the initital hypothesis that inserting the current date as a 
+ simple date stamp into the embedded query, e.g. "<2023-03-20>", would be sufficient to make the embedding model "figure it out", was
 proven incorrect. However, "spelling" out a full date with the week day included, e.g. "Today is Wed, March 20, 2023." was enough to tip the embedder
 off and get the required information into the embedding vector so it could be extracted by the distilled model.
 
