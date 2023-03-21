@@ -1,4 +1,3 @@
-> :warning: **Running this model requires an OpenAI API token**. Store it in the file `search_ai/config.ini`
 
 ## Description
 
@@ -27,6 +26,7 @@ off and get the required information into the embedding vector so it could be ex
 ## Training and use
 
 All code for generating training and validation data and training the model is in the Jupyter Notebooks inside the search_ai folder.
+A pickled list with the full dataset used for training is also included so the model can be trained without needing an OpenAI account.
 While the model is small enough to fit into the memory of even the most modest of laptops, training on the CPU is not advised as it is 
 catastrophically slow.
 
