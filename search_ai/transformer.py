@@ -158,7 +158,7 @@ class Decoder(nn.Module):
         return logits
     
 
-class Whisper(nn.Module):
+class CallFormer(nn.Module):
     def __init__(self, dims: ModelDimensions):
         super().__init__()
         self.dims = dims

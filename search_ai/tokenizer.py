@@ -25,7 +25,10 @@ API_VOCAB = {token: i for i, token in enumerate(API_VOCAB)}
 
 
 class Tokenizer:
-    def __init__(self, vocabulary: Optional[dict] = API_VOCAB):
+    def __init__(
+                 self, 
+                 vocabulary: Optional[dict] = API_VOCAB,
+                 ):
         self.vocab = vocabulary
         self.vocab_size = len(vocabulary)
         self.max_token_len = max([len(token) for token in vocabulary])
@@ -45,4 +48,14 @@ class Tokenizer:
         return torch.LongTensor(np.array(tokens))
     
     def decode(self, tokens: torch.Tensor) -> str:
-        return " ".join([self.vocab[t] for t in tokens])
+        if tokens.ndim == 1:
+            tokens = tokens.unsqueeze(0)
+        
+        texts = []
+        for i in range(tokens.shape[0]):
+            text = ""
+            for token in tokens[i]:
+                text += self.vocab[token]
+            texts.append(text)
+
+        return texts
