@@ -13,6 +13,7 @@ _vocab = [
     '<|searchcontacts|>',
     '<|searchwhatsapp|>',
     '<|searchtelegram|>',
+    '<|summarize|>',
     '(',
     ')',
     " ",
@@ -35,6 +36,7 @@ class Tokenizer:
         self.vocab_size: int = len(list(self.vocab.keys()))
         self.max_token_len: int = max([len(token) for token in self.vocab_lookup])
         self.sot_sequence = (self.vocab_lookup["<|start|>"],)
+        self.eot = self.vocab_lookup["<|end|>"]
 
     def encode(self, text: str) -> torch.Tensor:
         tokens = []

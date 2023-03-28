@@ -193,6 +193,8 @@ class DecodingOptions:
 
     length_penalty: Optional[float] = None
 
+    fp16: bool = False
+
 
 class DecodingTask:
     inference: Inference
@@ -218,8 +220,18 @@ class DecodingTask:
 
         self.sequence_ranker = MaximumLikelihoodRanker(length_penalty=self.options.length_penalty)
 
+        self.decoder = GreedyDecoder(temperature=self.options.temperature, eot=self.tokenizer.eot)
+
+    @torch.no_grad()
+    def run(self, embedding: Tensor) -> list[list[Tensor]]:
+        self.decoder.reset()
+        tokenizer: Tokenizer = self.tokenizer
+        n_batches: int = embedding.shape[0]
+
+        tokens: Tensor = torch.tensor([self.initial_tokens] * n_batches, device=embedding.device)
+
 @torch.no_grad()
-def decode(
+def decode_function(
     model: "CallFormer",
     embedding: Tensor,
     options: DecodingOptions = DecodingOptions(),

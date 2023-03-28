@@ -1,11 +1,39 @@
 [
-{"td": "-2d", "prompt": "Give me a summary of my notes from the past two days. Focus on the ones that are related to quantum computing."},
-{"td": "-3d", "prompt": "Summarize my thoughts on AI safety from the past three days. Organize the summary as a timeline."},
-{"td": "-1w", "prompt": "Give me a summary of the last week. Just everything you find."},
-{"td": "", "prompt": "I made some notes about heteroskedasticity and causal inference... It had something to do with Gaussian noise."},
-{"td": "-1mo", "prompt": "What have I recorded about macroeconomics in the last month?"},
-{"td": "-1w", "prompt" : "Can you summarize my notes on natural language processing from the past week? I'm particularly interested in any recent developments in the field."},
-{"td": "-2w", "prompt" : "Give me a summary of my notes on deep learning over the past two weeks. Focus on any new models or techniques that have emerged."},
+{
+    "td": "-2d", 
+    "prompt": "Give me a summary of my notes from the past two days. Focus on the ones that are related to quantum computing.",
+    "tokens": [ {"call": "<|searchnotes|>"}, {"call": "<|summarize|>", "args": []}]
+},
+{
+    "td": "-3d", 
+    "prompt": "Summarize my thoughts on AI safety from the past three days. Organize the summary as a timeline.",
+    "tokens": [ {"call": "<|searchnotes|>"}, {"call": "<|summarize|>", "args": []}]
+},
+{
+    "td": "-1w", 
+    "prompt": "Give me a summary of the last week. Just everything you find.",
+    "tokens": [ {"call": "<|searchnotes|>"}, {"call": "<|summarize|>", "args": []}]
+},
+{
+    "td": "", 
+    "prompt": "I made some notes about heteroskedasticity and causal inference... It had something to do with Gaussian noise.",
+    "tokens": [ {"call": "<|searchnotes|>"}, {"call": "<|summarize|>", "args": []}]
+},
+{
+    "td": "-1mo", 
+    "prompt": "What have I recorded about macroeconomics in the last month?",
+    "tokens": [ {"call": "<|searchnotes|>"}, {"call": "<|summarize|>", "args": []}]
+},
+{
+    "td": "-1w", 
+    "prompt" : "Can you summarize my notes on natural language processing from the past week? I'm particularly interested in any recent developments in the field.",
+    "tokens": [ {"call": "<|searchnotes|>"}, {"call": "<|summarize|>", "args": []}]
+},
+{
+    "td": "-2w", 
+    "prompt" : "Give me a summary of my notes on deep learning over the past two weeks. Focus on any new models or techniques that have emerged.",
+    "tokens": [ {"call": "<|searchnotes|>"}, {"call": "<|summarize|>", "args": []}]
+},
 {"td": "-1mo", "prompt" : "What have I recorded about blockchain technology in the last month? Can you give me a summary of any notable trends or developments?"},
 {"td": "-3d", "prompt" : "Summarize my thoughts on machine learning ethics from the past three days. Organize the summary as a list of key considerations."},
 {"td": "-2w", "prompt" : "Can you give me a summary of my notes on reinforcement learning from the past two weeks? Focus on any recent research findings or applications."},

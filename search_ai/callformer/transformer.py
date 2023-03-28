@@ -8,6 +8,7 @@ from torch import nn, Tensor
 import torch.nn.functional as F
 import numpy as np
 
+from .decoding import decode_function
 
 @dataclass
 class ModelDimensions:
@@ -182,7 +183,7 @@ class CallFormer(nn.Module):
             gzip.decompress(base64.b85decode(dump)), dtype=bool
         ).copy()
         mask = torch.from_numpy(array).reshape(
-            self.dims.n_text_layer, self.dims.n_head
+            self.dims.n_layer, self.dims.n_head
         )
         self.register_buffer("alignment_heads", mask.to_sparse(), persistent=False)
 
@@ -216,7 +217,7 @@ class CallFormer(nn.Module):
         hooks = []
 
         def save_to_cache(module, _, output):
-            if module not in cache or output.shape[1] > self.dims.n_text_ctx:
+            if module not in cache or output.shape[1] > self.dims.n_ctx:
                 # save as-is, for the first token or cross attention
                 cache[module] = output
             else:
