@@ -107,7 +107,7 @@ class ResidualAttentionBlock(nn.Module):
         kv_cache: Optional[dict] = None,
     ):
         x = x + self.attn(self.attn_ln(x), mask=mask, kv_cache=kv_cache)[0]
-        if self.cross_attn:
+        if self.cross_attn and self.cross_attn_ln:
             x = x + self.cross_attn(self.cross_attn_ln(x), xa, kv_cache=kv_cache)[0]
         x = x + self.mlp(self.mlp_ln(x))
         return x
@@ -127,7 +127,7 @@ class Decoder(nn.Module):
                 ResidualAttentionBlock(n_state, n_head, cross_attention=True)
                 for _ in range(n_layer)
             ]
-        )
+        ) # type: ignore
         self.ln = LayerNorm(n_state)
 
         mask = torch.empty(n_ctx, n_ctx).fill_(-np.inf).triu_(1)

@@ -191,6 +191,8 @@ class DecodingOptions:
 
     tokenizer: Tokenizer = field(default_factory=Tokenizer)
 
+    length_penalty: Optional[float] = None
+
 
 class DecodingTask:
     inference: Inference
@@ -204,7 +206,17 @@ class DecodingTask:
 
         self.tokenizer: Tokenizer = options.tokenizer 
 
-        self.n_ct = model.dims.n_ctx
+        self.n_ctx: int = model.dims.n_ctx
+        self.sample_len: int = options.sample_len or self.n_ctx // 2
+
+        self.sot_sequence: tuple[int] = self.tokenizer.sot_sequence
+
+        self.initial_tokens: tuple[int] = self.sot_sequence
+
+        self.inference = PyTorchInference(self.model, 
+                                          len(self.initial_tokens) )
+
+        self.sequence_ranker = MaximumLikelihoodRanker(length_penalty=self.options.length_penalty)
 
 @torch.no_grad()
 def decode(
