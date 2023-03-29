@@ -192,6 +192,7 @@ class CallFormer(nn.Module):
     def forward(
                 self, embedding: torch.Tensor, tokens: torch.LongTensor
                 ) -> Dict[str, torch.Tensor]:
+        
         return self.decoder(tokens, embedding)
 
     @property

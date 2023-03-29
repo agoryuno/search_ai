@@ -35,7 +35,7 @@ class PyTorchInference(Inference):
         self.kv_cache = {}
         self.hooks = []
 
-    def logits(self, tokens: Tensor, audio_features: Tensor) -> Tensor:
+    def logits(self, tokens: Tensor, embedding: Tensor) -> Tensor:
         if not self.kv_cache:
             self.kv_cache, self.hooks = self.model.install_kv_cache_hooks()
 
@@ -43,7 +43,7 @@ class PyTorchInference(Inference):
             # only need to use the last token except in the first forward pass
             tokens = tokens[:, -1:]
 
-        return self.model.decoder(tokens, audio_features, kv_cache=self.kv_cache)
+        return self.model.decoder(tokens, embedding, kv_cache=self.kv_cache)
 
     def cleanup_caching(self):
         for hook in self.hooks:
@@ -196,6 +196,13 @@ class DecodingOptions:
     fp16: bool = False
 
 
+@dataclass(frozen=True)
+class DecodingResult:
+    tokens: List[int] = field(default_factory=list)
+    avg_logprob: float = np.nan
+    temperature: float = np.nan
+
+
 class DecodingTask:
     inference: Inference
     sequence_ranker: SequenceRanker
@@ -222,13 +229,42 @@ class DecodingTask:
 
         self.decoder = GreedyDecoder(temperature=self.options.temperature, eot=self.tokenizer.eot)
 
+    def _main_loop(self,
+                   embedding: Tensor,
+                   tokens: Tensor,
+                   ) -> Tuple[Tensor, Tensor]:
+        assert tokens.shape[0] == embedding.shape[0]
+
+        n_batch = tokens.shape[0]
+        sum_logprobs: Tensor = torch.zeros(n_batch, device=embedding.device)
+
+        try:
+            for i in range(self.sample_len):
+                logits = self.inference.logits(tokens, embedding)
+
+                logits = logits[:, -1]
+
+                tokens, completed = self.decoder.update(tokens, logits, sum_logprobs)
+
+                if completed or tokens.shape[-1] > self.n_ctx:
+                    break
+
+        finally:
+            self.inference.cleanup_caching()
+
+        return tokens, sum_logprobs
+
+
     @torch.no_grad()
-    def run(self, embedding: Tensor) -> list[list[Tensor]]:
+    def run(self, embedding: Tensor) -> Tuple[Tensor, Tensor]:
         self.decoder.reset()
         tokenizer: Tokenizer = self.tokenizer
         n_batches: int = embedding.shape[0]
 
         tokens: Tensor = torch.tensor([self.initial_tokens] * n_batches, device=embedding.device)
+        tokens, sum_logprobs = self._main_loop(embedding, tokens)
+        tokens, sum_logprobs = self.decoder.finalize(tokens, sum_logprobs)
+        return tokens, sum_logprobs
 
 @torch.no_grad()
 def decode_function(
@@ -238,7 +274,9 @@ def decode_function(
     **kwargs,
 ):
 
-    if single := embedding.ndim == 1:
+    assert embedding.ndim in (2, 3)
+
+    if embedding.ndim == 2:
         embedding = embedding.unsqueeze(0)
 
     if kwargs:
@@ -246,4 +284,4 @@ def decode_function(
 
     result = DecodingTask(model, options).run(embedding)
 
-    return result[0] if single else result
+    return result
