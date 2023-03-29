@@ -243,6 +243,7 @@ class DecodingTask:
                 logits = self.inference.logits(tokens, embedding)
 
                 logits = logits[:, -1]
+                print (logits)
 
                 tokens, completed = self.decoder.update(tokens, logits, sum_logprobs)
 
