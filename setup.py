@@ -30,7 +30,7 @@ setup(
     url=URL,
     license=LICENSE,
     classifiers=CLASSIFIERS,
-    packages=['search_ai'],
+    packages=[package for package in find_packages() if package.startswith("search_ai")],
     install_requires=INSTALL_REQUIRES,
     python_requires='>=3.8',
 )
