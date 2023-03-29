@@ -1,6 +1,5 @@
 from setuptools import setup, find_packages
 
-# Update these variables to reflect your package's information
 PACKAGE_NAME = 'search_ai'
 DESCRIPTION = 'A test of a simple instructor AI'
 VERSION = '0.1.0'
@@ -19,8 +18,6 @@ CLASSIFIERS = [
 ]
 
 INSTALL_REQUIRES = [
-    # List your package's dependencies here
-    # For example: 'numpy>=1.14.0',
     'numpy',
     'torch'
 ]
