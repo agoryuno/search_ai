@@ -41,26 +41,28 @@ class Tokenizer:
     def encode(self, text: str) -> torch.Tensor:
         tokens = []
         curr_seq = ""
-        for char in text.split():
-            if curr_seq in self.vocab:
-                tokens.append(self.vocab[curr_seq])
+        for char in text:
+            curr_seq += char
+            if curr_seq in self.vocab_lookup:
+                tokens.append(self.vocab_lookup[curr_seq])
                 curr_seq = ""
                 continue
             if len(curr_seq) > self.max_token_len:
                 raise ValueError(f"Unknown token encountered: {curr_seq}")
-            curr_seq += char
+            
+            
         assert curr_seq == "", f"Unknown token encountered: {curr_seq}"
-        return torch.LongTensor(np.array(tokens))
+        return torch.tensor(np.array(tokens, dtype=np.int16), dtype=torch.short)
     
     def decode(self, tokens: torch.Tensor) -> list[str]:
         if tokens.ndim == 1:
-            tokens = tokens.unsqueeze(0)
+            tokens = tokens.unsqueeze(0) # type: ignore
         
         texts = []
         for i in range(tokens.shape[0]):
             text: str = ""
             for token in tokens[i]:
-                text += self.vocab[token]
+                text += self.vocab[token.item()] # type: ignore
             texts.append(text)
 
         return texts

@@ -160,7 +160,7 @@ class GreedyDecoder(TokenDecoder):
 
     def update(
         self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor
-    ) -> Tuple[Tensor, bool]:
+    ) -> Tuple[Tensor, Tensor]:
         if self.temperature == 0:
             next_tokens = logits.argmax(dim=-1)
         else:

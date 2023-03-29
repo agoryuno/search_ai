@@ -12,7 +12,6 @@ from .decoding import decode_function
 
 @dataclass
 class ModelDimensions:
-    n_mels: int
     n_vocab: int
     n_ctx: int
     n_state: int
