@@ -1,5 +1,3 @@
-from typing import Optional
-
 import torch
 import numpy as np
 
@@ -37,6 +35,7 @@ class Tokenizer:
         self.max_token_len: int = max([len(token) for token in self.vocab_lookup])
         self.sot_sequence = (self.vocab_lookup["<|start|>"],)
         self.eot = self.vocab_lookup["<|end|>"]
+        self.sot = self.vocab_lookup["<|start|>"]
         self.pad = self.vocab_lookup["<|pad|>"]
 
     def encode(self, text: str) -> torch.Tensor:
