@@ -277,6 +277,7 @@ def decode_function(
 ):
 
     assert embedding.ndim in (2, 3)
+    embedding = embedding.to(model.device)
 
     if embedding.ndim == 2:
         embedding = embedding.unsqueeze(0)
