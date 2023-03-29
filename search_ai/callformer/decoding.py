@@ -243,7 +243,6 @@ class DecodingTask:
                 logits = self.inference.logits(tokens, embedding)
 
                 logits = logits[:, -1]
-                print (logits)
 
                 tokens, completed = self.decoder.update(tokens, logits, sum_logprobs)
 
@@ -266,6 +265,8 @@ class DecodingTask:
         tokens, sum_logprobs = self._main_loop(embedding, tokens)
         tokens, sum_logprobs = self.decoder.finalize(tokens, sum_logprobs)
         return tokens, sum_logprobs
+
+
 
 @torch.no_grad()
 def decode_function(

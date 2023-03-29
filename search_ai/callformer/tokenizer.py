@@ -37,6 +37,7 @@ class Tokenizer:
         self.max_token_len: int = max([len(token) for token in self.vocab_lookup])
         self.sot_sequence = (self.vocab_lookup["<|start|>"],)
         self.eot = self.vocab_lookup["<|end|>"]
+        self.pad = self.vocab_lookup["<|pad|>"]
 
     def encode(self, text: str) -> torch.Tensor:
         tokens = []
@@ -52,7 +53,7 @@ class Tokenizer:
             
             
         assert curr_seq == "", f"Unknown token encountered: {curr_seq}"
-        return torch.tensor(np.array(tokens, dtype=np.int16), dtype=torch.short)
+        return torch.tensor(np.array(tokens), dtype=torch.long)
     
     def decode(self, tokens: torch.Tensor) -> list[str]:
         if tokens.ndim == 1:
