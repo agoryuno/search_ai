@@ -34,7 +34,7 @@ setup(
     url=URL,
     license=LICENSE,
     classifiers=CLASSIFIERS,
-    packages=find_packages(),
+    packages=['search_ai'],
     install_requires=INSTALL_REQUIRES,
     python_requires='>=3.8',
 )
