@@ -36,5 +36,5 @@ setup(
     classifiers=CLASSIFIERS,
     packages=find_packages(),
     install_requires=INSTALL_REQUIRES,
-    python_requires='>=3.6',
+    python_requires='>=3.8',
 )
