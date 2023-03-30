@@ -195,6 +195,8 @@ class DecodingOptions:
 
     fp16: bool = False
 
+    initial_tokens_length: Optional[int] = None
+
 
 @dataclass(frozen=True)
 class DecodingResult:
@@ -220,10 +222,14 @@ class DecodingTask:
 
         self.sot_sequence: tuple[int] = self.tokenizer.sot_sequence
 
+        self.initial_tokens_length = options.initial_tokens_length
         self.initial_tokens: tuple[int] = self.sot_sequence
 
+        if self.initial_tokens_length is None:
+            self.initial_tokens_length = len(self.initial_tokens)
+
         self.inference = PyTorchInference(self.model, 
-                                          len(self.initial_tokens) )
+                                          self.initial_tokens_length )
 
         self.sequence_ranker = MaximumLikelihoodRanker(length_penalty=self.options.length_penalty)
 
@@ -290,6 +296,9 @@ def decode_function(
 
     if kwargs:
         options = replace(options, **kwargs)
+    
+    if initial_tokens is not None:
+        options = replace(options, initial_tokens_length=len(initial_tokens))
 
     result = DecodingTask(model, options).run(embedding, initial_tokens=initial_tokens)
 
