@@ -17,6 +17,7 @@ class ModelDimensions:
     n_state: int
     n_head: int
     n_layer: int
+    n_prefix: int
 
 
 class LayerNorm(nn.LayerNorm):
@@ -115,8 +116,14 @@ class ResidualAttentionBlock(nn.Module):
 
 class Decoder(nn.Module):
     def __init__(
-        self, n_vocab: int, n_ctx: int, n_state: int, n_head: int, n_layer: int
-    ):
+                 self, 
+                 n_vocab: int, 
+                 n_ctx: int, 
+                 n_state: int, 
+                 n_head: int, 
+                 n_layer: int,
+                 n_prefix: int,
+                ):
         super().__init__()
 
         self.token_embedding = nn.Embedding(n_vocab, n_state)
@@ -130,7 +137,9 @@ class Decoder(nn.Module):
         ) # type: ignore
         self.ln = LayerNorm(n_state)
 
-        mask = torch.empty(n_ctx, n_ctx).fill_(-np.inf).triu_(1)
+        submask = torch.empty(n_ctx, n_ctx-n_prefix).fill_(-np.inf).triu_(1)
+        mask = torch.zeros(n_ctx, n_ctx)
+        mask[:, n_prefix:] = submask
         self.register_buffer("mask", mask, persistent=False)
 
     def forward(self, x: Tensor, xa: Tensor, kv_cache: Optional[dict] = None):
@@ -169,6 +178,7 @@ class CallFormer(nn.Module):
             self.dims.n_state,
             self.dims.n_head,
             self.dims.n_layer,
+            self.dims.n_prefix,
         )
         # use the last half layers for alignment by default; see `set_alignment_heads()` below
         all_heads = torch.zeros(
