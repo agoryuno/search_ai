@@ -256,12 +256,17 @@ class DecodingTask:
 
 
     @torch.no_grad()
-    def run(self, embedding: Tensor) -> Tuple[Tensor, Tensor]:
+    def run(
+            self, 
+            embedding: Tensor,
+            initial_tokens: Optional[tuple] = None) -> Tuple[Tensor, Tensor]:
         self.decoder.reset()
         tokenizer: Tokenizer = self.tokenizer
         n_batches: int = embedding.shape[0]
 
-        tokens: Tensor = torch.tensor([self.initial_tokens] * n_batches, device=embedding.device)
+        initial_tokens = initial_tokens if initial_tokens is not None else self.initial_tokens
+
+        tokens: Tensor = torch.tensor([initial_tokens] * n_batches, device=embedding.device)
         tokens, sum_logprobs = self._main_loop(embedding, tokens)
         tokens, sum_logprobs = self.decoder.finalize(tokens, sum_logprobs)
         return tokens, sum_logprobs
