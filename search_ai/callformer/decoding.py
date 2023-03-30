@@ -278,6 +278,7 @@ def decode_function(
     model: "CallFormer",
     embedding: Tensor,
     options: DecodingOptions = DecodingOptions(),
+    initial_tokens: Optional[tuple] = None,
     **kwargs,
 ):
 
@@ -290,6 +291,6 @@ def decode_function(
     if kwargs:
         options = replace(options, **kwargs)
 
-    result = DecodingTask(model, options).run(embedding)
+    result = DecodingTask(model, options).run(embedding, initial_tokens=initial_tokens)
 
     return result
