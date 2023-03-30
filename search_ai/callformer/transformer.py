@@ -137,9 +137,10 @@ class Decoder(nn.Module):
         ) # type: ignore
         self.ln = LayerNorm(n_state)
 
-        submask = torch.empty(n_ctx, n_ctx-n_prefix).fill_(-np.inf).triu_(1)
-        mask = torch.zeros(n_ctx, n_ctx)
-        mask[:, n_prefix:] = submask
+        #submask = torch.empty(n_ctx, n_ctx-n_prefix).fill_(-np.inf).triu_(1)
+        #mask = torch.zeros(n_ctx, n_ctx)
+        #mask[:, n_prefix:] = submask
+        mask = torch.empty(n_ctx, n_ctx).fill_(-np.inf).triu_(1)
         self.register_buffer("mask", mask, persistent=False)
 
     def forward(self, x: Tensor, xa: Tensor, kv_cache: Optional[dict] = None):
