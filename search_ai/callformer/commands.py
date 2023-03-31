@@ -84,6 +84,7 @@ class Date(Argument):
                         self.tokenizer.vocab_lookup[f"{i}"] for i in range(10)
                         ])
                 if self.sequence[9] == self.tokenizer.vocab_lookup["2"]:
+                    if 
                     return tuple([
                         self.tokenizer.vocab_lookup[f"{i}"] for i in range(1,10)
                         ])
