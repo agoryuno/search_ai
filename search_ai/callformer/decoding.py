@@ -182,6 +182,37 @@ class GreedyDecoder(TokenDecoder):
         return tokens, sum_logprobs.tolist()
     
 
+class BeamSearchDecoder(TokenDecoder):
+    def __init__(
+                  self,
+                  beam_size: int,
+                  eot: int,
+                  inference: Inference,
+                  patience: Optional[float] = None,
+                ):
+        self.beam_size = beam_size
+        self.eot = eot
+        self.inference = inference
+        self.patience = patience or 1.0
+        self.max_candidates: int = round (beam_size * self.patience)
+        self.finished_sequences = None
+
+        assert (
+            self.max_candidates > 0
+        ), f"Invalid beam size ({beam_size}) or patience ({patience})"
+
+    def reset(self):
+        self.finished_sequences = None
+
+    def update(
+               self,
+               tokens: Tensor,
+               logits: Tensor,
+               sum_logprobs: Tensor,
+                ) -> Tuple[Tensor, bool]:
+        if tokens.shape[0] % self.beam_size != 0:
+            raise ValueError(f"{tokens.shape}[0] % {self.beam_size} != 0")
+
 @dataclass(frozen=True)
 class DecodingOptions:
     temperature: float = 0.0
