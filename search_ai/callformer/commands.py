@@ -18,12 +18,20 @@ class Argument(ABC):
     end_token: Tuple[str, ...]
     sequence: list[int] = []
     tokenizer: Tokenizer
+    complete: bool = False
+    const_length: Optional[int] = None
 
     def __init__(self, tokenizer: Tokenizer) -> None:
         self.tokenizer = tokenizer
 
     def add_token(self, token_index: int) -> None:
+        assert not self.complete, "Attempting to add token to a complete argument"
+        assert token_index in self.next_tokens(), ("Atempting to add an invalid"
+                                                   f" token: {token_index}")
         self.sequence.append(token_index)
+        if self.const_length is not None:
+            if len(self.sequence) == self.const_length:
+                self.complete = True
 
     @abstractmethod
     def next_tokens(self) -> list[int]:
@@ -33,6 +41,7 @@ class Argument(ABC):
 class Date(Argument):
     start_token = ('"',)
     end_token = ('"',)
+    const_length = 12
 
     def next_tokens(self) -> Tuple[int, ...]:
         if len(self.sequence) == 0:
@@ -55,7 +64,7 @@ class Date(Argument):
                     ])
             if self.sequence[6] == self.tokenizer.vocab_lookup["1"]:
                 return tuple([
-                    self.tokenizer.vocab_lookup[f"{i}"] for i in range(1,3)
+                    self.tokenizer.vocab_lookup[f"{i}"] for i in range(3)
                     ])
         if len(self.sequence) == 8:
             return (self.tokenizer.vocab_lookup["-"],)
@@ -84,14 +93,20 @@ class Date(Argument):
                         self.tokenizer.vocab_lookup[f"{i}"] for i in range(10)
                         ])
                 if self.sequence[9] == self.tokenizer.vocab_lookup["2"]:
-                    if 
+                    if num_days == 28:
+                        return tuple([
+                            self.tokenizer.vocab_lookup[f"{i}"] for i in range(9)
+                            ])
                     return tuple([
-                        self.tokenizer.vocab_lookup[f"{i}"] for i in range(1,10)
+                        self.tokenizer.vocab_lookup[f"{i}"] for i in range(10)
                         ])
                 if self.sequence[9] == self.tokenizer.vocab_lookup["3"]:
                     return tuple([
-                        self.tokenizer.vocab_lookup[f"{i}"] for i in range(1,2)
+                        self.tokenizer.vocab_lookup[f"{i}"] for i in range(2)
                         ])
+        if len(self.sequence) == 11:
+            return (self.tokenizer.vocab_lookup['"'],)
+        return ()
 
 
 class Command(ABC):
@@ -164,5 +179,29 @@ if __name__ == "__main__":
     #s2 = StartCommand(Tokenizer())
     
     import calendar
-    d = '"2010-01-01"'
-    print (calendar.monthrange(int(d[1:5]), int(d[6:8]))[1])
+    d = Date(Tokenizer())
+
+    d.add_token(d.tokenizer.vocab_lookup['"'])
+    print ([d.tokenizer.vocab[i] for i in d.next_tokens()])
+    d.add_token(d.tokenizer.vocab_lookup['2'])
+    print ([d.tokenizer.vocab[i] for i in d.next_tokens()])
+    d.add_token(d.tokenizer.vocab_lookup['0'])
+    print ([d.tokenizer.vocab[i] for i in d.next_tokens()])
+    d.add_token(d.tokenizer.vocab_lookup['4'])
+    print ([d.tokenizer.vocab[i] for i in d.next_tokens()])
+    d.add_token(d.tokenizer.vocab_lookup['1'])
+    print ([d.tokenizer.vocab[i] for i in d.next_tokens()])
+    d.add_token(d.tokenizer.vocab_lookup['-'])
+    print ([d.tokenizer.vocab[i] for i in d.next_tokens()])
+    d.add_token(d.tokenizer.vocab_lookup['1'])
+    print ([d.tokenizer.vocab[i] for i in d.next_tokens()])
+    d.add_token(d.tokenizer.vocab_lookup['0'])
+    print ([d.tokenizer.vocab[i] for i in d.next_tokens()])
+    d.add_token(d.tokenizer.vocab_lookup['-'])
+    print ([d.tokenizer.vocab[i] for i in d.next_tokens()])
+    d.add_token(d.tokenizer.vocab_lookup['2'])
+    print ([d.tokenizer.vocab[i] for i in d.next_tokens()])
+    d.add_token(d.tokenizer.vocab_lookup['6'])
+    print ([d.tokenizer.vocab[i] for i in d.next_tokens()])
+    d.add_token(d.tokenizer.vocab_lookup['"'])
+    print ([d.tokenizer.vocab[i] for i in d.next_tokens()])
