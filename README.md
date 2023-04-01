@@ -43,6 +43,11 @@ used to generate the training data. More training prompts are needed before asse
 ## WIP notes on CallFormer
 
 1. All arguments to commands must be enclosed in double quotes, including numeric arguments. This is to simplify processing and allow the model to terminate an argument
-at any time: quotes delimit the start and end of an argument's value and allow the model to know when it has reached the end of the argument's value. Parsing of values is left up to the recepient of the command.
+at any time: quotes delimit the start and end of an argument's value and allow the model to decide when it has reached the end of the argument's value. Parsing of values is left up to the recepient of the command.
 
-2. All arguments to commands are always required - optional arguments are not supported. If you need a command to take a variable number of arguments, make several versions of the command with different numbers of arguments and different names.
+2. All arguments to commands are always required - optional arguments are not supported. If you need a command to take a variable number of arguments, make several versions of the command with different numbers of arguments and different names. For instance a "search" command can take the start and end dates, as well as the maximum number of results to return, as arguments. This could then have versions: search(start, end, max_results), search1(start), search2(start, end), search3(max_results) and so on.
+
+Of course an alternative (and possibly - better) solution for that example would be to have a dedicated "limit" command that takes the maximum number of results to return as an argument.
+
+3. Floating point numbers in arguments of commands that are between -1 and 1 should have a
+zero before the decimal point, e.g. 0.5, 0.25, -0.75, 0.125, 0.0625, etc. 

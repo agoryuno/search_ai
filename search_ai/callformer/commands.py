@@ -33,10 +33,18 @@ class Argument(ABC):
             if len(self.sequence) == self.const_length:
                 self.complete = True
 
-    @abstractmethod
-    def next_tokens(self) -> tuple[int]:
-        ...
+    def should_complete(self) -> bool:
+        if len(self.sequence) > 1 and self.sequence[-1] == '"':
+            self.complete = True
+            return self.complete
+        if self.const_length is not None:
+            self.complete = len(self.sequence) == self.const_length
+            return self.complete
+        return False
 
+    @abstractmethod
+    def next_tokens(self) -> Union[tuple[int], tuple[()]]:
+        ...
 
 class ArgumentList(ABC):
     # All arguments listed in `args` are required
@@ -73,11 +81,19 @@ class Number(Argument):
         super().__init__(tokenizer, *args, **kwargs)
         self.dtype = dtype
 
-    def next_tokens(self) -> tuple[int, ...]:
-        tokens = [self.tokenizer.vocab_lookup[f"{i}"] for i in range(10)]
-        if len(self.sequence) > 0 and self.dtype == float:
-            tokens.append(self.tokenizer.vocab_lookup["."])
-        return tuple(tokens)
+    def next_tokens(self):
+        if self.should_complete():
+            return ()
+        if len(self.sequence) == 0:
+            return (self.tokenizer.vocab_lookup['"'],)
+        toks = [
+            self.tokenizer.vocab_lookup[f"{i}"] for i in range(10)
+            ]
+        if len(self.sequence) > 1:
+            toks += ['"', '.']
+        elif len(self.sequence) == 1:
+            toks += ['-']
+        return tuple(toks)
         
 
 class Date(Argument):
