@@ -14,18 +14,18 @@ ArgsTypes = Tuple[ArgTypes, ...]
 
 
 class Argument(ABC):
-    start_token: Tuple[str, ...]
-    end_token: Tuple[str, ...]
     sequence: list[int] = []
     tokenizer: Tokenizer
     complete: bool = False
     const_length: Optional[int] = None
+    optional: bool
 
-    def __init__(self, tokenizer: Tokenizer) -> None:
+    def __init__(self, tokenizer, optional=False) -> None:
         self.tokenizer = tokenizer
+        self.optional = optional
 
     def add_token(self, token_index: int) -> None:
-        assert not self.complete, "Attempting to add token to a complete argument"
+        assert not self.complete, "Attempting to add a token to a completed argument"
         assert token_index in self.next_tokens(), ("Atempting to add an invalid"
                                                    f" token: {token_index}")
         self.sequence.append(token_index)
@@ -34,16 +34,57 @@ class Argument(ABC):
                 self.complete = True
 
     @abstractmethod
-    def next_tokens(self) -> list[int]:
+    def next_tokens(self) -> tuple[int]:
         ...
 
 
+class ArgumentList(ABC):
+    # All arguments listed in `args` are required
+    args: tuple[Argument]
+    tokenizer: Tokenizer
+    complete: bool = False
+    generating: Optional[int] = None
+
+    def __init__(self, args) -> None:
+        self.args = args
+        self.tokenizer = self.args[0].tokenizer
+
+    def add_token(self, token_index: int) -> None:
+        assert self.generating is not None, "No argument is currently being generated"
+        self.args[self.generating].add_token(token_index)
+
+    def next_tokens(self) -> Union[tuple[int], tuple]:
+        if self.generating is None:
+            toks = self.args[0].next_tokens()
+            self.generating = 0
+        toks = self.args[self.generating].next_tokens()
+        if len(toks) == 0:
+            if self.generating == len(self.args) - 1:
+                self.complete = True
+                return ()
+            self.generating += 1
+            return self.tokenizer.vocab_lookup[","],
+        return toks
+    
+
+class Number(Argument):
+
+    def __init__(self, tokenizer, dtype: Union[int, float], *args, **kwargs) -> None:
+        super().__init__(tokenizer, *args, **kwargs)
+        self.dtype = dtype
+
+    def next_tokens(self) -> tuple[int, ...]:
+        tokens = [self.tokenizer.vocab_lookup[f"{i}"] for i in range(10)]
+        if len(self.sequence) > 0 and self.dtype == float:
+            tokens.append(self.tokenizer.vocab_lookup["."])
+        return tuple(tokens)
+        
+
 class Date(Argument):
-    start_token = ('"',)
-    end_token = ('"',)
+    optional = True
     const_length = 12
 
-    def next_tokens(self) -> Tuple[int, ...]:
+    def next_tokens(self) -> tuple[int, ...]:
         if len(self.sequence) == 0:
             return (self.tokenizer.vocab_lookup['"'],)
         if len(self.sequence) == 1:
@@ -111,21 +152,30 @@ class Date(Argument):
 
 class Command(ABC):
     token: str
+    tokenizer: Tokenizer
+    index: int
+    sequence: list[int]
     complete: bool = False
     takes_arguments: bool = False
-    argument_types: ArgsTypes = ()
+    #argument_types: ArgsTypes = ()
+    args_list: Optional[ArgumentList] = None
+    
 
-    def __init__(self, tokenizer: Tokenizer) -> None:
+    def __init__(self, tokenizer) -> None:
         self.index = tokenizer.vocab_lookup[self.token]
         self.sequence = [self.index]
         self.tokenizer = tokenizer
 
-        if self.takes_arguments:
-            assert self.argument_types is not None
+        #if self.takes_arguments:
+        #    assert self.argument_types is not None
 
 
     @abstractmethod
     def filter_logits(self, logits: Tensor) -> Tensor:
+        ...
+
+    @abstractmethod
+    def next_tokens(self) -> Union[tuple[int, ...], tuple[()]]:
         ...
 
     def add_token(self, token_index: int) -> None:
@@ -135,7 +185,23 @@ class Command(ABC):
 class StartCommand(Command):
     token = "<|start|>"
     takes_arguments = True
-    argument_types = (str, str, int)
+    tokenizer = Tokenizer()
+    args_list = ArgumentList(Date(tokenizer))
+
+    def next_tokens(self):
+        assert not self.complete
+
+        if len(self.sequence) == 0:
+            return (self.index,)
+        if self.takes_arguments and self.args_list is not None:
+            if len(self.sequence) == 1:
+                return (self.tokenizer.vocab_lookup["("],)
+            if len(self.sequence) > 1:
+                toks = self.args_list.next_tokens()
+                if len(toks) == 0:
+                    return (self.tokenizer.vocab_lookup[")"],)
+        
+        
 
     def filter_logits(self, logits: Tensor) -> Tensor:
         """

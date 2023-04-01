@@ -38,3 +38,11 @@ Inference can be done on either the GPU or the CPU.
 
 The trained model gives 99% accuracy on the training and validation datasets. However, the two heavily intersect due to the nature of the process
 used to generate the training data. More training prompts are needed before assessing the true practical fitness of the model.
+
+
+## WIP notes on CallFormer
+
+1. All arguments to commands must be enclosed in double quotes, including numeric arguments. This is to simplify processing and allow the model to terminate an argument
+at any time: quotes delimit the start and end of an argument's value and allow the model to know when it has reached the end of the argument's value. Parsing of values is left up to the recepient of the command.
+
+2. All arguments to commands are always required - optional arguments are not supported. If you need a command to take a variable number of arguments, make several versions of the command with different numbers of arguments and different names.

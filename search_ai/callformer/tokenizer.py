@@ -18,6 +18,7 @@ _vocab = [
     "-",
     '"',
     "'",
+    ",",
 ]
 _vocab += [str(i) for i in range(10)]
 API_VOCAB = {i: token for i, token in enumerate(_vocab)}
