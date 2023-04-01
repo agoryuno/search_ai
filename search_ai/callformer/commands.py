@@ -3,10 +3,6 @@ from typing import Tuple, Union, Type, Optional, Generator
 from typing import Literal
 import calendar
 
-import numpy as np
-import torch
-from torch import Tensor
-
 from .tokenizer import Tokenizer
 
 
