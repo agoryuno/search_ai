@@ -133,8 +133,9 @@ class Command(ABC):
         self.sequence.append(token_index)
 
     def valid_tokens(self) -> Generator:
-        assert self.takes_arguments, ("This command does not take arguments"
-                                      " and has no tokens to generate")
+        if not self.takes_arguments:
+            self.complete = True
+            return ()
         for toks in self.args_list.valid_tokens():
             yield toks
 
@@ -246,6 +247,10 @@ class SearchNotesCommand2(Command):
         self.args_list = ArgumentList((Date(), Date()))
 
 
+class SummarizeCommand(Command):
+    token: str = "<|summarize|>"
+    
+
 class CommandsList:
     valid_commands: tuple[Command, ...]
     commands_dict: dict[str, int]
@@ -258,7 +263,8 @@ class CommandsList:
     def __init__(self) -> None:
         self.valid_commands = (
                 SearchNotesCommand1(), 
-                SearchNotesCommand2()
+                SearchNotesCommand2(),
+                SummarizeCommand(),
         )
         self.terminator = self.tokenizer.vocab[self.tokenizer.eot]
         self.sequence = []
