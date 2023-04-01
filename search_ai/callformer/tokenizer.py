@@ -7,6 +7,7 @@ _vocab = [
     "<|start|>",
     "<|end|>",
     "<|searchnotes1|>",
+    "<|searchnotes2|>",
     "<|searchemails|>",
     '<|searchcontacts|>',
     '<searchmessengers|>',
@@ -25,6 +26,15 @@ API_VOCAB = {i: token for i, token in enumerate(_vocab)}
 
 
 class Tokenizer:
+    vocab: dict[int, str]
+    vocab_lookup: dict[str, int]
+    vocab_size: int
+    max_token_len: int
+    sot_sequence: tuple[int]
+    eot: int
+    sot: int
+    pad: int
+    
     def __init__(
                  self, 
                  vocabulary: dict[int, str] = API_VOCAB,

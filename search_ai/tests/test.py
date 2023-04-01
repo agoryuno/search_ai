@@ -4,24 +4,42 @@ sys.path.append('..')
 
 import numpy as np
 
-from callformer.commands import Date, SearchNotesCommand1
-from callformer.tokenizer import Tokenizer
+from callformer.commands import Date, SearchNotesCommand1, SearchNotesCommand2
+from callformer.commands import CommandsList
 
+class TestCommandsList(unittest.TestCase):
+     
+     def test_1(self):
+        comms_list = CommandsList()
+        for toks in comms_list.valid_tokens():
+            idx = np.random.randint(0, len(toks))
+            comms_list.add_token(toks[idx])
+        print ("".join([comms_list.tokenizer.vocab[t] 
+                        for t in comms_list.sequence]))
+            
 
 class TestSearchNotesCommand1(unittest.TestCase):
     
-        def test_1(self):
-            comm = SearchNotesCommand1()
-            comm2 = SearchNotesCommand1()
-            self.assertEqual(id(comm.tokenizer), id(comm2.tokenizer))
-            self.assertNotEqual(id(comm.args_list), id(comm2.args_list))
+    def test_1(self):
+        comm = SearchNotesCommand1()
+        comm2 = SearchNotesCommand1()
+        self.assertEqual(id(comm.tokenizer), id(comm2.tokenizer))
+        self.assertNotEqual(id(comm.args_list), id(comm2.args_list))
 
-        def test_2(self):
-            comm = SearchNotesCommand1()
-            for toks in comm.valid_tokens():
-                idx = np.random.randint(0, len(toks))
-                comm.add_token(toks[idx])
-            print ("".join([comm.tokenizer.vocab[t] for t in comm.sequence]))
+    def test_2(self):
+        comm = SearchNotesCommand1()
+        for toks in comm.valid_tokens():
+            idx = np.random.randint(0, len(toks))
+            comm.add_token(toks[idx])
+        print ("".join([comm.tokenizer.vocab[t] for t in comm.sequence]))
+
+    def test_3(self):
+        comm = SearchNotesCommand2()
+        for toks in comm.valid_tokens():
+            idx = np.random.randint(0, len(toks))
+            comm.add_token(toks[idx])
+        print ("".join([comm.tokenizer.vocab[t] for t in comm.sequence]))
+
 
 class TestDateArgument(unittest.TestCase):
 
@@ -30,9 +48,6 @@ class TestDateArgument(unittest.TestCase):
         for toks in date.valid_tokens():
             idx = np.random.randint(0, len(toks))
             date.add_token(toks[idx])
-            #print ([date.tokenizer.vocab[t] for t in toks],
-            #        " -> ", 
-            #        date.tokenizer.vocab[toks[idx]])
 
 
 class TestArgumentList(unittest.TestCase):

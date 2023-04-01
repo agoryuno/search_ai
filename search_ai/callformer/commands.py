@@ -83,7 +83,8 @@ class ArgumentList(ObjectBase):
                                       tuple[Literal[False], tuple[()]]]:
         if len(self.sequence) == 0:
             self.generating = 0
-            self.sequence.append(self.tokenizer.vocab_lookup[self.start])
+            return True, (self.tokenizer.vocab_lookup[self.start],)
+            #self.sequence.append(self.tokenizer.vocab_lookup[self.start])
         return False, ()
 
 
@@ -91,7 +92,10 @@ class ArgumentList(ObjectBase):
         assert not self.complete, "Attempting to add a token to a completed sequence"
         assert self.generating is not None, "No argument is currently being generated"
         if self.generating < len(self.args):
-            self.args[self.generating].add_token(token_index)
+            if token_index not in (self.tokenizer.vocab_lookup[self.start],
+                                   self.tokenizer.vocab_lookup[self.terminator],
+                                   self.tokenizer.vocab_lookup[","]):
+                self.args[self.generating].add_token(token_index)
         self.sequence.append(token_index)
         if len(self.sequence) > 1 and \
             self.tokenizer.vocab[token_index] == self.terminator:
@@ -124,13 +128,15 @@ class Command(ABC):
         self.index = self.tokenizer.vocab_lookup[self.token]
         self.sequence = [self.index]
 
-    @abstractmethod
-    def next_tokens(self) -> Union[tuple[int, ...], tuple[()]]:
-        ...
-
     def add_token(self, token_index: int) -> None:
         self.args_list.add_token(token_index)
         self.sequence.append(token_index)
+
+    def valid_tokens(self) -> Generator:
+        assert self.takes_arguments, ("This command does not take arguments"
+                                      " and has no tokens to generate")
+        for toks in self.args_list.valid_tokens():
+            yield toks
 
 
 class Number(Argument):
@@ -231,21 +237,61 @@ class SearchNotesCommand1(Command):
         self.args_list = ArgumentList((Date(),))
         
 
-    def next_tokens(self):
-        assert not self.complete
+class SearchNotesCommand2(Command):
+    token: str = "<|searchnotes2|>"
+    takes_arguments: bool = True
 
-        if len(self.sequence) == 0:
-            return (self.index,)
-        if self.takes_arguments and self.args_list is not None:
-            if len(self.sequence) == 1:
-                return (self.tokenizer.vocab_lookup["("],)
-            if len(self.sequence) > 1:
-                toks = self.args_list.next_tokens()
-                if len(toks) == 0:
-                    return (self.tokenizer.vocab_lookup[")"],)
+    def __init__(self) -> None:
+        super().__init__()
+        self.args_list = ArgumentList((Date(), Date()))
+
+
+class CommandsList:
+    valid_commands: tuple[Command, ...]
+    commands_dict: dict[str, int]
+    tokenizer: Tokenizer = Tokenizer()
+    terminator: str
+    sequence: list[int]
+    generating: Optional[int] = None
+    complete: bool = False
+
+    def __init__(self) -> None:
+        self.valid_commands = (
+                SearchNotesCommand1(), 
+                SearchNotesCommand2()
+        )
+        self.terminator = self.tokenizer.vocab[self.tokenizer.eot]
+        self.sequence = []
+        self.commands_dict = {c.token: i for i,c in enumerate(self.valid_commands)}
+
+    def add_token(self, token_index: int) -> None:
+        self.sequence.append(token_index)
+        if self.tokenizer.vocab[token_index] == self.terminator:
+            self.complete = True
+            return
+        if self.generating is None:
+            assert self.tokenizer.vocab[token_index] in self.commands_dict, (
+                f"Invalid token: {self.tokenizer.vocab[token_index]}"
+            )
+            self.generating = self.commands_dict[self.tokenizer.vocab[token_index]]
+            return
+        self.valid_commands[self.generating].add_token(token_index)
         
+
+    def next_tokens(self) -> Union[tuple[int], tuple[()]]:
+        if self.generating is None:
+            return tuple([self.tokenizer.vocab_lookup[c.token] 
+                             for c in self.valid_commands] + 
+                             [self.tokenizer.vocab_lookup[self.terminator]])
+        try:
+            toks = next(self.valid_commands[self.generating].valid_tokens())
+        except StopIteration:
+            self.generating = None
+            return self.next_tokens()
+        return toks
+
     def valid_tokens(self) -> Generator:
-        assert self.takes_arguments, ("This command does not take arguments"
-                                      " and has no tokens to generate")
-        for toks in self.args_list.valid_tokens():
-            yield toks
+        while not self.complete:
+            toks = self.next_tokens()
+            yield toks            
+    
