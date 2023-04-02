@@ -10,6 +10,15 @@ ArgTypes = Union[Type["Date"], Type["Number"]]
 ArgsTypes = Tuple[ArgTypes, ...]
 
 
+def copy_commands_list(cmd_list1: "CommandsList") -> "CommandsList":
+    cmd_list2 = CommandsList()
+    for token in cmd_list1.sequence:
+        cmd_list2.next_tokens()
+        cmd_list2.add_token(token)
+    return cmd_list2
+
+
+
 def start_wrapper(f):
     def wrapper(self: Union["Argument", "ArgumentList"]) -> Union[tuple[int], tuple[()]]:
         start, toks = self.start_sequence()
