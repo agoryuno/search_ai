@@ -13,6 +13,7 @@ _vocab = [
     '<searchmessengers|>',
     '<|summarize|>',
     '<|limit|>',
+    '<|curr_date|>',
     '(',
     ')',
     " ",
@@ -34,7 +35,7 @@ class Tokenizer:
     eot: int
     sot: int
     pad: int
-    
+
     def __init__(
                  self, 
                  vocabulary: dict[int, str] = API_VOCAB,

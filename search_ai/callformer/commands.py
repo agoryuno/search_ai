@@ -295,5 +295,8 @@ class CommandsList:
     def valid_tokens(self) -> Generator:
         while not self.complete:
             toks = self.next_tokens()
-            yield toks            
+            yield toks     
+
+    def decode(self) -> str:
+        return "".join([self.tokenizer.vocab[i] for i in self.sequence])     
     

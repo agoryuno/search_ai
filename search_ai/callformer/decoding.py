@@ -1,6 +1,8 @@
 from abc import ABC
 from dataclasses import dataclass, field, replace
 from typing import Tuple, Sequence, List, Optional, TYPE_CHECKING
+from typing import Type, Callable
+from datetime import datetime
 
 import numpy as np
 import torch
@@ -11,6 +13,7 @@ import torch.nn.functional as F
 if TYPE_CHECKING:
     from .transformer import CallFormer
 
+from .commands import CommandsList
 from .tokenizer import Tokenizer
 
 
@@ -196,6 +199,7 @@ class BeamSearchDecoder(TokenDecoder):
         self.patience = patience or 1.0
         self.max_candidates: int = round (beam_size * self.patience)
         self.finished_sequences = None
+        self.token_generator = CommandsList()
 
         assert (
             self.max_candidates > 0
@@ -208,15 +212,51 @@ class BeamSearchDecoder(TokenDecoder):
                self,
                tokens: Tensor,
                logits: Tensor,
-               sum_logprobs: Tensor,
+               groups: Optional[list[list[CommandsList]]] = None,
                 ) -> Tuple[Tensor, bool]:
         if tokens.shape[0] % self.beam_size != 0:
             raise ValueError(f"{tokens.shape}[0] % {self.beam_size} != 0")
 
+        n_groups = tokens.shape[0] // self.beam_size
+        if self.finished_sequences is None:
+            self.finished_sequences = [{} for _ in range(n_groups)]
+
+        if groups is None:
+            groups = [[CommandsList() for __ in range(n_groups)] 
+                      for _ in range(tokens.shape[0])]
+            token_generator = CommandsList()
+            valid_tokens = next(token_generator.valid_tokens())
+            mask = torch.empty_like(logits).fill_(-np.inf)
+            for i in range(tokens.shape[0]):
+                groups.append([])
+                for j in range(n_groups):
+                    token_generator = CommandsList()
+                    groups[i].append(token_generator)
+            
+        for i, token_generators in enumerate(groups):
+            for j, token_generator in enumerate(token_generators):
+                valid_tokens = next(token_generator.valid_tokens())
+                mask = torch.empty_like(logits[i]).fill_(-np.inf)
+                mask[:, valid_tokens] = 0.0
+                choice_logits = logits[i] + mask
+                choice_probs = F.softmax(choice_logits, dim=-1)
+
+        print (mask.shape)
+
+        logprobs = F.log_softmax(logits.float(), dim=-1)
+        assert False
+
+
+def decoder_options_factory(**kwargs) -> Callable:
+    return lambda: dict(**kwargs)
+
+
+def curr_date_factory() -> str:
+    return datetime.now().strftime("%Y-%m-%d")
+
+
 @dataclass(frozen=True)
 class DecodingOptions:
-    temperature: float = 0.0
-
     # This is the maximum number of tokens to be sampled
     sample_len: Optional[int] = None
 
@@ -227,6 +267,17 @@ class DecodingOptions:
     fp16: bool = False
 
     initial_tokens_length: Optional[int] = None
+
+    decoder: Type[TokenDecoder] = GreedyDecoder
+
+    sot_sequence: tuple[int] = Tokenizer().sot_sequence
+
+    decoder_options: dict = field(default_factory=decoder_options_factory(
+                temperature=0.0, 
+                eot=Tokenizer().eot,
+                ))
+    
+    curr_date: str = field(default_factory=curr_date_factory)
 
 
 @dataclass(frozen=True)
@@ -253,18 +304,25 @@ class DecodingTask:
 
         self.sot_sequence: tuple[int] = self.tokenizer.sot_sequence
 
-        self.initial_tokens_length = options.initial_tokens_length
-        self.initial_tokens: tuple[int] = self.sot_sequence
-
-        if self.initial_tokens_length is None:
-            self.initial_tokens_length = len(self.initial_tokens)
+        self.initial_tokens = self._get_initial_tokens()
+        self.initial_tokens_length = len(self.initial_tokens)
 
         self.inference = PyTorchInference(self.model, 
                                           self.initial_tokens_length )
 
         self.sequence_ranker = MaximumLikelihoodRanker(length_penalty=self.options.length_penalty)
 
-        self.decoder = GreedyDecoder(temperature=self.options.temperature, eot=self.tokenizer.eot)
+        if self.options.decoder == BeamSearchDecoder:
+            self.options.decoder_options['inference'] = self.inference
+        self.decoder = self.options.decoder(**self.options.decoder_options)
+
+    def _get_initial_tokens(self) -> tuple[int]:
+        date_str = self.options.curr_date or datetime.now().strftime("%Y-%m-%d")
+        cd_token = self.tokenizer.vocab_lookup['<|curr_date|>']
+        tokens = (self.sot_sequence + (cd_token,) +
+                    tuple(self.tokenizer.encode(f'("{date_str}")').tolist())
+                  )
+        return tokens
 
     def _main_loop(self,
                    embedding: Tensor,
@@ -296,14 +354,12 @@ class DecodingTask:
     def run(
             self, 
             embedding: Tensor,
-            initial_tokens: Optional[tuple] = None) -> Tuple[Tensor, Tensor]:
+            ) -> Tuple[Tensor, Tensor]:
         self.decoder.reset()
         tokenizer: Tokenizer = self.tokenizer
         n_batches: int = embedding.shape[0]
 
-        initial_tokens = initial_tokens if initial_tokens is not None else self.initial_tokens
-
-        tokens: Tensor = torch.tensor([initial_tokens] * n_batches, device=embedding.device)
+        tokens: Tensor = torch.tensor([self.initial_tokens] * n_batches, device=embedding.device)
         tokens, sum_logprobs = self._main_loop(embedding, tokens)
         tokens, sum_logprobs = self.decoder.finalize(tokens, sum_logprobs)
         return tokens, sum_logprobs
@@ -315,7 +371,6 @@ def decode_function(
     model: "CallFormer",
     embedding: Tensor,
     options: DecodingOptions = DecodingOptions(),
-    initial_tokens: Optional[tuple] = None,
     **kwargs,
 ):
 
@@ -328,9 +383,6 @@ def decode_function(
     if kwargs:
         options = replace(options, **kwargs)
     
-    if initial_tokens is not None:
-        options = replace(options, initial_tokens_length=len(initial_tokens))
-
-    result = DecodingTask(model, options).run(embedding, initial_tokens=initial_tokens)
+    result = DecodingTask(model, options).run(embedding)
 
     return result
