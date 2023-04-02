@@ -275,6 +275,9 @@ class CommandsList:
         self.sequence = []
         self.commands_dict = {c.token: i for i,c in enumerate(self.valid_commands)}
 
+    def __hash__(self):
+        return hash(tuple(self.sequence))
+
     def add_token(self, token_index: int) -> None:
         self.sequence.append(token_index)
         if self.tokenizer.vocab[token_index] == self.terminator:

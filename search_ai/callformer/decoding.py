@@ -13,7 +13,7 @@ import torch.nn.functional as F
 if TYPE_CHECKING:
     from .transformer import CallFormer
 
-from .commands import CommandsList
+from .commands import CommandsList, copy_commands_list
 from .tokenizer import Tokenizer
 
 
@@ -105,7 +105,10 @@ class TokenDecoder:
         """Initialize any stateful variables for decoding a new sequence"""
 
     def update(
-        self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor
+        self, 
+        tokens: Tensor, 
+        logits: Tensor, 
+        batches: Optional[list[list[tuple[CommandsList, float]]]] = None
     ) -> Tuple[Tensor, bool]:
         """Specify how to select the next token, based on the current trace and logits
 
@@ -132,8 +135,10 @@ class TokenDecoder:
         raise NotImplementedError
 
     def finalize(
-        self, tokens: Tensor, sum_logprobs: Tensor
-    ) -> Tuple[Sequence[Sequence[Tensor]], List[List[float]]]:
+        self, 
+        tokens: Tensor, 
+        batches: Optional[list[list[tuple[CommandsList, float]]]] = None,
+    ) -> Sequence[Sequence[Tensor]]:
         """Finalize search and return the final candidate sequences
 
         Parameters
@@ -212,36 +217,43 @@ class BeamSearchDecoder(TokenDecoder):
                self,
                tokens: Tensor,
                logits: Tensor,
-               groups: Optional[list[list[CommandsList]]] = None,
+               batches: Optional[list[list[tuple[CommandsList, float]]]] = None,
                 ) -> Tuple[Tensor, bool]:
-        if tokens.shape[0] % self.beam_size != 0:
-            raise ValueError(f"{tokens.shape}[0] % {self.beam_size} != 0")
+        #if tokens.shape[0] % self.beam_size != 0:
+        #    raise ValueError(f"{tokens.shape}[0] % {self.beam_size} != 0")
 
-        n_groups = tokens.shape[0] // self.beam_size
-        if self.finished_sequences is None:
-            self.finished_sequences = [{} for _ in range(n_groups)]
+        #n_groups = tokens.shape[0] // self.beam_size
+        #if self.finished_sequences is None:
+        #    self.finished_sequences = [{} for _ in range(n_groups)]
 
-        if groups is None:
-            groups = [[CommandsList() for __ in range(n_groups)] 
+        logprobs = F.log_softmax(logits, dim=-1)
+
+        if batches is None:
+            batches = [[(CommandsList(), 0.0) for _ in range(self.beam_size)] 
                       for _ in range(tokens.shape[0])]
-            token_generator = CommandsList()
-            valid_tokens = next(token_generator.valid_tokens())
-            mask = torch.empty_like(logits).fill_(-np.inf)
-            for i in range(tokens.shape[0]):
-                groups.append([])
-                for j in range(n_groups):
-                    token_generator = CommandsList()
-                    groups[i].append(token_generator)
-            
-        for i, token_generators in enumerate(groups):
-            for j, token_generator in enumerate(token_generators):
-                valid_tokens = next(token_generator.valid_tokens())
-                mask = torch.empty_like(logits[i]).fill_(-np.inf)
+        
+        new_batches = []    
+        for i,batch in enumerate(batches):
+            new_cls = []
+            for cmdlist, sum_logprob in batch:
+                valid_tokens = next(cmdlist.valid_tokens())
+                mask = torch.empty_like(logits).fill_(-np.inf)
                 mask[:, valid_tokens] = 0.0
                 choice_logits = logits[i] + mask
                 choice_probs = F.softmax(choice_logits, dim=-1)
+                assert choice_probs.shape[0] == 1
+                for prob, j in zip(*choice_probs[0].topk(self.beam_size, dim=-1)):
+                    print (prob, j)
+                    token = j.item()
+                    if prob > 0.0:
+                        new_cl = copy_commands_list(cmdlist)
+                        new_cl.add_token(token)
+                        new_cls.append( (new_cl, sum_logprob + logprobs[i, token]) )
 
-        print (mask.shape)
+            new_cls = sorted(new_cls, key=lambda x: x[1], reverse=True)
+            print (new_cls)
+            assert False
+
 
         logprobs = F.log_softmax(logits.float(), dim=-1)
         assert False
@@ -327,11 +339,10 @@ class DecodingTask:
     def _main_loop(self,
                    embedding: Tensor,
                    tokens: Tensor,
-                   ) -> Tuple[Tensor, Tensor]:
+                   ) -> Tensor:
         assert tokens.shape[0] == embedding.shape[0]
 
         n_batch = tokens.shape[0]
-        sum_logprobs: Tensor = torch.zeros(n_batch, device=embedding.device)
 
         try:
             for i in range(self.sample_len):
@@ -339,7 +350,7 @@ class DecodingTask:
 
                 logits = logits[:, -1]
 
-                tokens, completed = self.decoder.update(tokens, logits, sum_logprobs)
+                tokens, completed = self.decoder.update(tokens, logits)
 
                 if completed or tokens.shape[-1] > self.n_ctx:
                     break
@@ -347,22 +358,22 @@ class DecodingTask:
         finally:
             self.inference.cleanup_caching()
 
-        return tokens, sum_logprobs
+        return tokens
 
 
     @torch.no_grad()
     def run(
             self, 
             embedding: Tensor,
-            ) -> Tuple[Tensor, Tensor]:
+            ) -> Tensor:
         self.decoder.reset()
         tokenizer: Tokenizer = self.tokenizer
         n_batches: int = embedding.shape[0]
 
         tokens: Tensor = torch.tensor([self.initial_tokens] * n_batches, device=embedding.device)
-        tokens, sum_logprobs = self._main_loop(embedding, tokens)
-        tokens, sum_logprobs = self.decoder.finalize(tokens, sum_logprobs)
-        return tokens, sum_logprobs
+        tokens = self._main_loop(embedding, tokens)
+        tokens = self.decoder.finalize(tokens)
+        return tokens
 
 
 
@@ -383,6 +394,7 @@ def decode_function(
     if kwargs:
         options = replace(options, **kwargs)
     
-    result = DecodingTask(model, options).run(embedding)
+    with torch.no_grad():
+        result = DecodingTask(model, options).run(embedding)
 
     return result
