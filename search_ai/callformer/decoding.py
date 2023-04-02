@@ -218,7 +218,7 @@ class BeamSearchDecoder(TokenDecoder):
                tokens: Tensor,
                logits: Tensor,
                batches: Optional[list[list[tuple[CommandsList, float]]]] = None,
-                ) -> Tuple[Tensor, bool]:
+                ) -> Tuple[list[tuple[CommandsList, float]], bool]:
         #if tokens.shape[0] % self.beam_size != 0:
         #    raise ValueError(f"{tokens.shape}[0] % {self.beam_size} != 0")
 
@@ -226,37 +226,42 @@ class BeamSearchDecoder(TokenDecoder):
         #if self.finished_sequences is None:
         #    self.finished_sequences = [{} for _ in range(n_groups)]
 
-        logprobs = F.log_softmax(logits, dim=-1)
+        logprobs = F.log_softmax(logits.float(), dim=-1)
 
         if batches is None:
             batches = [[(CommandsList(), 0.0) for _ in range(self.beam_size)] 
                       for _ in range(tokens.shape[0])]
         
+        completed = []
         new_batches = []    
         for i,batch in enumerate(batches):
-            new_cls = []
+            new_cls = {}
             for cmdlist, sum_logprob in batch:
-                valid_tokens = next(cmdlist.valid_tokens())
+                try:
+                    valid_tokens = next(cmdlist.valid_tokens())
+                except StopIteration:
+                    new_cls[cmdlist] = sum_logprob
+                    continue
                 mask = torch.empty_like(logits).fill_(-np.inf)
                 mask[:, valid_tokens] = 0.0
                 choice_logits = logits[i] + mask
                 choice_probs = F.softmax(choice_logits, dim=-1)
                 assert choice_probs.shape[0] == 1
                 for prob, j in zip(*choice_probs[0].topk(self.beam_size, dim=-1)):
-                    print (prob, j)
                     token = j.item()
                     if prob > 0.0:
                         new_cl = copy_commands_list(cmdlist)
                         new_cl.add_token(token)
-                        new_cls.append( (new_cl, sum_logprob + logprobs[i, token]) )
-
+                        new_cls[new_cl] = sum_logprob + logprobs[i, token]
+            new_cls = [(k, v) for k, v in new_cls.items()]
             new_cls = sorted(new_cls, key=lambda x: x[1], reverse=True)
-            print (new_cls)
-            assert False
+            if len(new_cls) > self.beam_size:
+                new_cls = new_cls[:self.beam_size]
+            for cls,_ in new_cls:
+                completed.append(cls.complete)
+            new_batches.append(new_cls)
 
-
-        logprobs = F.log_softmax(logits.float(), dim=-1)
-        assert False
+        return new_batches, all(completed)
 
 
 def decoder_options_factory(**kwargs) -> Callable:

@@ -277,6 +277,9 @@ class CommandsList:
 
     def __hash__(self):
         return hash(tuple(self.sequence))
+    
+    def __eq__(self, other):
+        return self.sequence == other.sequence
 
     def add_token(self, token_index: int) -> None:
         self.sequence.append(token_index)
