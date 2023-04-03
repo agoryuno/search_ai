@@ -108,7 +108,7 @@ class TokenDecoder:
         self, 
         tokens: Tensor, 
         logits: Tensor, 
-        batches: Optional[list[list[tuple[CommandsList, float]]]] = None
+        sum_logprobs: Tensor,
     ) -> Tuple[Tensor, bool]:
         """Specify how to select the next token, based on the current trace and logits
 
@@ -217,23 +217,70 @@ class BeamSearchDecoder(TokenDecoder):
                self,
                tokens: Tensor,
                logits: Tensor,
-               batches: Optional[list[list[tuple[CommandsList, float]]]] = None,
+               sum_logprobs: Tensor,
                 ) -> Tuple[list[tuple[CommandsList, float]], bool]:
-        #if tokens.shape[0] % self.beam_size != 0:
-        #    raise ValueError(f"{tokens.shape}[0] % {self.beam_size} != 0")
+        if tokens.shape[0] % self.beam_size != 0:
+            raise ValueError(f"{tokens.shape}[0] % {self.beam_size} != 0")
 
-        #n_groups = tokens.shape[0] // self.beam_size
+        n_batches = tokens.shape[0] // self.beam_size
         #if self.finished_sequences is None:
         #    self.finished_sequences = [{} for _ in range(n_groups)]
 
-        logprobs = F.log_softmax(logits.float(), dim=-1)
+        print (logits.shape, tokens.shape, n_batches)
 
-        if batches is None:
-            batches = [[(CommandsList(), 0.0) for _ in range(self.beam_size)] 
-                      for _ in range(tokens.shape[0])]
+        logprobs = F.log_softmax(logits.float(), dim=-1)
+        print (logprobs)
         
-        completed = []
-        new_batches = []    
+        generating = tokens.shape[0]
+        new_batches = []
+
+        for i in range(n_batches):
+            beam_sequences = []
+            for j in range(self.beam_size):
+                idx = i*self.beam_size + j
+                cmd_list = CommandsList()
+                for token in tokens[idx]:
+                    next_tokens = cmd_list.next_tokens()
+                    if len(next_tokens) == 0:
+                        break
+                    cmd_list.add_token(token.item())
+                if cmd_list.complete:
+                    generating -= 1
+                    continue
+
+                next_tokens = cmd_list.next_tokens()
+                if len(next_tokens) == 0:
+                    generating -= 1
+                    continue
+                
+                mask = torch.empty_like(logits[i]).fill_(-np.inf)
+                mask[list(next_tokens)] = 0.0
+                choice_logits = logits[idx] + mask
+                choice_probs = F.softmax(choice_logits, dim=-1)
+
+                for prob, k in zip(*choice_probs.topk(self.beam_size, dim=-1)):
+                    if prob.item() > 0.:
+                        beam_sequences.append((tuple(cmd_list.sequence + [k.item()]),
+                                               (sum_logprobs[idx] + logprobs[idx, k.item()]).item()))
+            
+            beam_sequences =  sorted(list(set(beam_sequences)), key=lambda x: x[1], reverse=True)
+
+            # In case we get fewer sequences than the beam size, we repeat the best one
+            if len(beam_sequences) < self.beam_size:
+                beam_sequences += [beam_sequences[0]] * (self.beam_size - len(beam_sequences))
+
+            beam_sequences = beam_sequences[:self.beam_size]
+
+            
+            print (beam_sequences)
+                
+            assert False
+
+            print (f"{choice_probs=}")
+            print ("".join([cmd_list.tokenizer.vocab[t] for t in cmd_list.sequence]))
+            print ([cmd_list.tokenizer.vocab[t] for t in next_tokens])
+        assert False
+
         for i,batch in enumerate(batches):
             new_cls = {}
             for cmdlist, sum_logprob in batch:
@@ -246,7 +293,7 @@ class BeamSearchDecoder(TokenDecoder):
                 mask[:, valid_tokens] = 0.0
                 choice_logits = logits[i] + mask
                 choice_probs = F.softmax(choice_logits, dim=-1)
-                assert choice_probs.shape[0] == 1
+                assert choice_probs.shape[0] == self.beam_size, f"{choice_probs.shape=}"
                 for prob, j in zip(*choice_probs[0].topk(self.beam_size, dim=-1)):
                     token = j.item()
                     if prob > 0.0:
@@ -261,6 +308,9 @@ class BeamSearchDecoder(TokenDecoder):
                 completed.append(cls.complete)
             new_batches.append(new_cls)
 
+        print (f"{len(new_batches)=}")
+        print ([cmlst[0].sequence for batch in new_batches for cmlst in batch ])
+        print (tokens)
         return new_batches, all(completed)
 
 
@@ -295,6 +345,8 @@ class DecodingOptions:
                 ))
     
     curr_date: str = field(default_factory=curr_date_factory)
+
+    n_groups: int = 2
 
 
 @dataclass(frozen=True)
@@ -333,6 +385,8 @@ class DecodingTask:
             self.options.decoder_options['inference'] = self.inference
         self.decoder = self.options.decoder(**self.options.decoder_options)
 
+        self.n_groups = options.n_groups
+
     def _get_initial_tokens(self) -> tuple[int]:
         date_str = self.options.curr_date or datetime.now().strftime("%Y-%m-%d")
         cd_token = self.tokenizer.vocab_lookup['<|curr_date|>']
@@ -348,21 +402,24 @@ class DecodingTask:
         assert tokens.shape[0] == embedding.shape[0]
 
         n_batch = tokens.shape[0]
-
+        sum_logprobs: Tensor = torch.zeros(n_batch, device=embedding.device)
+        
         try:
             for i in range(self.sample_len):
                 logits = self.inference.logits(tokens, embedding)
 
                 logits = logits[:, -1]
 
-                tokens, completed = self.decoder.update(tokens, logits)
+                batches, completed = self.decoder.update(tokens, logits, sum_logprobs)
 
-                if completed or tokens.shape[-1] > self.n_ctx:
+                if completed:
                     break
 
         finally:
             self.inference.cleanup_caching()
 
+        print (batches)
+        assert False
         return tokens
 
 
@@ -372,10 +429,12 @@ class DecodingTask:
             embedding: Tensor,
             ) -> Tensor:
         self.decoder.reset()
-        tokenizer: Tokenizer = self.tokenizer
         n_batches: int = embedding.shape[0]
 
         tokens: Tensor = torch.tensor([self.initial_tokens] * n_batches, device=embedding.device)
+        tokens = tokens.repeat_interleave(self.n_groups, dim=0)
+        embedding = embedding.repeat_interleave(self.n_groups, dim=0)
+        
         tokens = self._main_loop(embedding, tokens)
         tokens = self.decoder.finalize(tokens)
         return tokens

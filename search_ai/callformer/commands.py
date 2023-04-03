@@ -256,6 +256,19 @@ class SummarizeCommand(Command):
     token: str = "<|summarize|>"
     
 
+class StartCommand(Command):
+    token: str = "<|start|>"
+
+
+class CurrentDateCommand(Command):
+    token: str = "<|curr_date|>"
+    takes_arguments: bool = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.args_list = ArgumentList((Date(),))
+
+
 class CommandsList:
     valid_commands: tuple[Command, ...]
     commands_dict: dict[str, int]
@@ -264,12 +277,15 @@ class CommandsList:
     sequence: list[int]
     generating: Optional[int] = None
     complete: bool = False
+    init_complete: bool = False
 
     def __init__(self) -> None:
         self.valid_commands = (
                 SearchNotesCommand1(), 
                 SearchNotesCommand2(),
                 SummarizeCommand(),
+                StartCommand(),
+                CurrentDateCommand(),
         )
         self.terminator = self.tokenizer.vocab[self.tokenizer.eot]
         self.sequence = []
@@ -297,9 +313,16 @@ class CommandsList:
 
     def next_tokens(self) -> Union[tuple[int], tuple[()]]:
         if self.generating is None:
+            if not self.init_complete:
+                if len(self.sequence) == 0:
+                    return (self.tokenizer.vocab_lookup[StartCommand().token],)
+                if self.sequence[-1] == self.tokenizer.vocab_lookup[StartCommand().token]:
+                    return (self.tokenizer.vocab_lookup[CurrentDateCommand().token],)
+            self.init_complete = True
             return tuple([self.tokenizer.vocab_lookup[c.token] 
-                             for c in self.valid_commands] + 
-                             [self.tokenizer.vocab_lookup[self.terminator]])
+                          for c in self.valid_commands 
+                            if type(c) not in (StartCommand, CurrentDateCommand)] + 
+                          [self.tokenizer.vocab_lookup[self.terminator]])
         try:
             toks = next(self.valid_commands[self.generating].valid_tokens())
         except StopIteration:
