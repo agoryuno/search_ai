@@ -197,6 +197,7 @@ class BeamSearchDecoder(TokenDecoder):
                   eot: int,
                   inference: Inference,
                   patience: Optional[float] = None,
+                  max_length: Optional[int] = None,
                   temperature: Optional[float] = None,
                 ):
         self.beam_size = beam_size
@@ -206,6 +207,7 @@ class BeamSearchDecoder(TokenDecoder):
         self.max_candidates: int = round (beam_size * self.patience)
         self.finished_sequences: dict[tuple, float] = {}
         self.token_generator = CommandsList()
+        self.max_length = max_length or 50
 
         assert (
             self.max_candidates > 0
@@ -228,6 +230,7 @@ class BeamSearchDecoder(TokenDecoder):
 
         logprobs = F.log_softmax(logits.float(), dim=-1)
         
+        batch_sequences, batch_sum_logprobs = [], []
         for i in range(n_batches):
             beam_sequences = []
             for j in range(self.beam_size):
@@ -240,13 +243,16 @@ class BeamSearchDecoder(TokenDecoder):
                     cmd_list.add_token(token.item())
                 
                 if cmd_list.complete:
-                    self.finished_sequences[tuple(cmd_list.sequence)] = sum_logprobs[idx].item()
+                    self.finished_sequences[tuple(cmd_list.sequence)] = (sum_logprobs[idx] + logprobs[idx]).item()
                     continue
 
                 next_tokens = cmd_list.next_tokens()
 
                 if cmd_list.complete:
-                    self.finished_sequences[tuple(cmd_list.sequence)] = sum_logprobs[idx].item()
+                    self.finished_sequences[tuple(cmd_list.sequence)] = (sum_logprobs[idx] + logprobs[idx]).item()
+                    continue
+
+                if len(cmd_list.sequence) > self.max_length:
                     continue
                 
                 mask = torch.empty_like(logits[i]).fill_(-np.inf)
@@ -259,6 +265,9 @@ class BeamSearchDecoder(TokenDecoder):
                         beam_sequences.append((tuple(cmd_list.sequence + [k.item()]),
                                                (sum_logprobs[idx] + logprobs[idx, k.item()]).item()))
             
+            if len(beam_sequences) == 0:
+                beam_sequences = [(tuple(tokens[i*self.beam_size].tolist()), sum_logprobs[i*self.beam_size].item())]
+
             beam_sequences =  sorted(list(set(beam_sequences)), key=lambda x: x[1], reverse=True)
 
             # In case we get fewer sequences than the beam size, we repeat the best one
@@ -267,19 +276,24 @@ class BeamSearchDecoder(TokenDecoder):
 
             beam_sequences = beam_sequences[:self.beam_size]
 
-            sum_logprobs = torch.tensor([x[1] for x in beam_sequences])
-            new_tokens = torch.tensor([x[0] for x in beam_sequences])
+            new_tokens, sum_logs = zip(*beam_sequences)
+            self.inference.cleanup_caching()
+            for seq in new_tokens:
+                batch_sequences.append(seq)
+            for sl in sum_logs:
+                batch_sum_logprobs.append(sl)
 
-            for i in range(new_tokens.shape[0]):
-                print ("".join([self.token_generator.tokenizer.vocab[t.item()] for t in new_tokens[i]]))
-            
-            complete = False
-            if len(list(self.finished_sequences.keys())) == tokens.shape[0]:
-                complete = True
-            print (new_tokens.shape, sum_logprobs.shape, complete)
-            print (sum_logprobs)
-            return new_tokens, sum_logprobs, complete
+        complete = False
+        if len(list(self.finished_sequences.keys())) == self.max_candidates:
+            complete = True
+        
+        new_tokens = torch.tensor(batch_sequences, dtype=torch.long, device=tokens.device)
+        new_sum_logprobs = torch.tensor(batch_sum_logprobs, dtype=torch.float, device=tokens.device)
+        
+        return new_tokens, sum_logprobs, complete
 
+    def finalize(self, tokens: Tensor, sum_logprobs: Tensor):
+        print (self.finished_sequences)
 
 def decoder_options_factory(**kwargs) -> Callable:
     return lambda: dict(**kwargs)
@@ -366,7 +380,7 @@ class DecodingTask:
     def _main_loop(self,
                    embedding: Tensor,
                    tokens: Tensor,
-                   ) -> Tensor:
+                   ) -> tuple[Tensor, Tensor]:
         assert tokens.shape[0] == embedding.shape[0]
 
         n_batch = tokens.shape[0]
@@ -385,9 +399,8 @@ class DecodingTask:
 
         finally:
             self.inference.cleanup_caching()
-
-        assert False
-        return tokens
+        
+        return tokens, sum_logprobs
 
 
     @torch.no_grad()
@@ -402,8 +415,8 @@ class DecodingTask:
         tokens = tokens.repeat_interleave(self.n_groups, dim=0)
         embedding = embedding.repeat_interleave(self.n_groups, dim=0)
         
-        tokens = self._main_loop(embedding, tokens)
-        tokens = self.decoder.finalize(tokens)
+        tokens, sum_logprobs = self._main_loop(embedding, tokens)
+        tokens = self.decoder.finalize(tokens, sum_logprobs)
         return tokens
 
 
