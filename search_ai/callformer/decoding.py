@@ -40,13 +40,15 @@ class PyTorchInference(Inference):
 
     def logits(self, tokens: Tensor, embedding: Tensor) -> Tensor:
         if not self.kv_cache:
+            print ("creating kv_cache")
             self.kv_cache, self.hooks = self.model.install_kv_cache_hooks()
 
         if tokens.shape[-1] > self.initial_token_length:
             # only need to use the last token except in the first forward pass
             tokens = tokens[:, -1:]
 
-        return self.model.decoder(tokens, embedding, kv_cache=self.kv_cache)
+        res = self.model.decoder(tokens, embedding, kv_cache=self.kv_cache)
+        return res.detach()
 
     def cleanup_caching(self):
         for hook in self.hooks:
@@ -216,6 +218,79 @@ class BeamSearchDecoder(TokenDecoder):
     def reset(self):
         self.finished_sequences = {}
 
+    def extend_sequence(
+                        self, 
+                        sequence: list[int], 
+                        logit: Tensor, 
+                        sum_logprob: Tensor) -> tuple[Tensor,
+                                                      Tensor,
+                                                      dict[tuple, float]]:
+        
+        assert sequence[-1] != self.eot, "Sequence already ended"
+
+        cmd_list = CommandsList()
+        for token in sequence:
+            next_tokens = cmd_list.next_tokens()
+            if len(next_tokens) == 0:
+                break
+            assert token in next_tokens, f"{token} not in {next_tokens}"
+            cmd_list.add_token(token)
+        
+        next_tokens = cmd_list.next_tokens()
+
+        mask = torch.empty_like(logit).fill_(-np.inf)
+        mask[list(next_tokens)] = 0.0
+        choice_logits = logit + mask
+        choice_probs = F.softmax(choice_logits, dim=-1)
+
+        new_sequences, finished = {}, {}
+
+        logprob = F.log_softmax(logit, dim=-1)
+        for p, t in zip(*choice_probs.topk(self.beam_size, dim=-1)):
+            prob, token = p.item(), t.item()
+            if prob > 0.:
+                new_sequences[tuple(sequence + [token])] = (sum_logprob + logprob[token]).item()
+                if token == self.eot:
+                    finished[tuple(sequence + [token])] = new_sequences[tuple(sequence + [token])]
+
+        sequences = sorted([(k,v) for k,v in new_sequences.items()], 
+                           key=lambda x: x[1],
+                           reverse=True)
+
+        new_tokens = torch.tensor([list(s[0]) for s in sequences[:self.beam_size]
+                                   if not finished.get(s[0], False)])
+        new_sumlogprobs = torch.tensor([s[1] for s in sequences[:self.beam_size]
+                                        if not finished.get(s[0], False)])
+        return new_tokens, new_sumlogprobs, finished
+    
+    def make_beam(self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor):
+        beam_sequences = {}
+        assert tokens.shape[0] == self.beam_size
+
+        assigned = {}
+        for i in range(tokens.shape[0]):
+            sequences, slogprobs, finished = self.extend_sequence(
+                                        tokens[i].tolist(), 
+                                        logits[i], 
+                                        sum_logprobs[i])
+            self.finished_sequences.update(finished)
+            for j in range(sequences.shape[0]):
+                if not assigned.get(tuple(sequences[j].tolist()), False) and \
+                    not finished.get(tuple(sequences[j].tolist()), False):
+                    beam_sequences[i] = (sequences[j], slogprobs[j])
+                    assigned[tuple(sequences[j].tolist())] = True
+                    break
+            if not beam_sequences.get(i, False):
+                beam_sequences[i] = (sequences[0], slogprobs[0])
+                assigned[tuple(sequences[0].tolist())] = True
+
+        new_tokens = torch.empty((tokens.shape[0], tokens.shape[1] + 1), dtype=torch.long)
+        new_sumlogprobs = torch.empty_like(sum_logprobs)
+        for i,t in beam_sequences.items():
+            new_tokens[i] = t[0]
+            new_sumlogprobs[i] = t[1]
+        return new_tokens, new_sumlogprobs
+
     def update(
                self,
                tokens: Tensor,
@@ -227,73 +302,30 @@ class BeamSearchDecoder(TokenDecoder):
 
         n_batches = tokens.shape[0] // self.beam_size
 
-
-        logprobs = F.log_softmax(logits.float(), dim=-1)
-        
         batch_sequences, batch_sum_logprobs = [], []
-        for i in range(n_batches):
-            beam_sequences = []
-            for j in range(self.beam_size):
-                idx = i*self.beam_size + j
-                cmd_list = CommandsList()
-                for token in tokens[idx]:
-                    next_tokens = cmd_list.next_tokens()
-                    if len(next_tokens) == 0:
-                        break
-                    cmd_list.add_token(token.item())
-                
-                if cmd_list.complete:
-                    self.finished_sequences[tuple(cmd_list.sequence)] = (sum_logprobs[idx] + logprobs[idx]).item()
-                    continue
 
-                next_tokens = cmd_list.next_tokens()
+        new_tokens = torch.empty((tokens.shape[0], tokens.shape[1]+1), dtype=torch.long)
+        new_sumlogprobs = torch.empty_like(sum_logprobs)
 
-                if cmd_list.complete:
-                    self.finished_sequences[tuple(cmd_list.sequence)] = (sum_logprobs[idx] + logprobs[idx]).item()
-                    continue
-
-                if len(cmd_list.sequence) > self.max_length:
-                    continue
-                
-                mask = torch.empty_like(logits[i]).fill_(-np.inf)
-                mask[list(next_tokens)] = 0.0
-                choice_logits = logits[idx] + mask
-                choice_probs = F.softmax(choice_logits, dim=-1)
-
-                for prob, k in zip(*choice_probs.topk(self.beam_size, dim=-1)):
-                    if prob.item() > 0.:
-                        beam_sequences.append((tuple(cmd_list.sequence + [k.item()]),
-                                               (sum_logprobs[idx] + logprobs[idx, k.item()]).item()))
-            
-            if len(beam_sequences) == 0:
-                beam_sequences = [(tuple(tokens[i*self.beam_size].tolist()), sum_logprobs[i*self.beam_size].item())]
-
-            beam_sequences =  sorted(list(set(beam_sequences)), key=lambda x: x[1], reverse=True)
-
-            # In case we get fewer sequences than the beam size, we repeat the best one
-            if len(beam_sequences) < self.beam_size:
-                beam_sequences += [beam_sequences[0]] * (self.beam_size - len(beam_sequences))
-
-            beam_sequences = beam_sequences[:self.beam_size]
-
-            new_tokens, sum_logs = zip(*beam_sequences)
-            self.inference.cleanup_caching()
-            for seq in new_tokens:
-                batch_sequences.append(seq)
-            for sl in sum_logs:
-                batch_sum_logprobs.append(sl)
+        for i in range(0, n_batches, self.beam_size):
+            beam_tokens, beam_sum_logprobs = self.make_beam(tokens[:self.beam_size], 
+                       logits[:self.beam_size], 
+                       sum_logprobs[:self.beam_size])
+            new_tokens[i:i+self.beam_size] = beam_tokens
+            new_sumlogprobs[i:i+self.beam_size] = beam_sum_logprobs
 
         complete = False
         if len(list(self.finished_sequences.keys())) == self.max_candidates:
             complete = True
         
-        new_tokens = torch.tensor(batch_sequences, dtype=torch.long, device=tokens.device)
-        new_sum_logprobs = torch.tensor(batch_sum_logprobs, dtype=torch.float, device=tokens.device)
-        
-        return new_tokens, sum_logprobs, complete
+        return new_tokens, new_sumlogprobs, complete
 
     def finalize(self, tokens: Tensor, sum_logprobs: Tensor):
-        print (self.finished_sequences)
+        sequence = sorted([(k,v) for k,v in self.finished_sequences.items()],
+               key=lambda x: x[1],)[0]
+        self.reset()
+        return sequence
+
 
 def decoder_options_factory(**kwargs) -> Callable:
     return lambda: dict(**kwargs)
@@ -366,7 +398,6 @@ class DecodingTask:
             self.options.decoder_options['inference'] = self.inference
             self.options.decoder_options['beam_size'] = options.n_groups
         self.decoder = self.options.decoder(**self.options.decoder_options)
-        print (f"{options.n_groups=}")
         self.n_groups = options.n_groups
 
     def _get_initial_tokens(self) -> tuple[int]:
@@ -389,7 +420,6 @@ class DecodingTask:
         try:
             for i in range(self.sample_len):
                 logits = self.inference.logits(tokens, embedding)
-
                 logits = logits[:, -1]
 
                 tokens, sum_logprobs, completed = self.decoder.update(tokens, logits, sum_logprobs)
