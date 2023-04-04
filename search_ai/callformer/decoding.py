@@ -197,13 +197,14 @@ class BeamSearchDecoder(TokenDecoder):
                   eot: int,
                   inference: Inference,
                   patience: Optional[float] = None,
+                  temperature: Optional[float] = None,
                 ):
         self.beam_size = beam_size
         self.eot = eot
         self.inference = inference
         self.patience = patience or 1.0
         self.max_candidates: int = round (beam_size * self.patience)
-        self.finished_sequences = None
+        self.finished_sequences: dict[tuple, float] = {}
         self.token_generator = CommandsList()
 
         assert (
@@ -211,29 +212,22 @@ class BeamSearchDecoder(TokenDecoder):
         ), f"Invalid beam size ({beam_size}) or patience ({patience})"
 
     def reset(self):
-        self.finished_sequences = None
+        self.finished_sequences = {}
 
     def update(
                self,
                tokens: Tensor,
                logits: Tensor,
                sum_logprobs: Tensor,
-                ) -> Tuple[list[tuple[CommandsList, float]], bool]:
+                ) -> Tuple[Tensor, Tensor, bool]:
         if tokens.shape[0] % self.beam_size != 0:
             raise ValueError(f"{tokens.shape}[0] % {self.beam_size} != 0")
 
         n_batches = tokens.shape[0] // self.beam_size
-        #if self.finished_sequences is None:
-        #    self.finished_sequences = [{} for _ in range(n_groups)]
 
-        print (logits.shape, tokens.shape, n_batches)
 
         logprobs = F.log_softmax(logits.float(), dim=-1)
-        print (logprobs)
         
-        generating = tokens.shape[0]
-        new_batches = []
-
         for i in range(n_batches):
             beam_sequences = []
             for j in range(self.beam_size):
@@ -244,13 +238,15 @@ class BeamSearchDecoder(TokenDecoder):
                     if len(next_tokens) == 0:
                         break
                     cmd_list.add_token(token.item())
+                
                 if cmd_list.complete:
-                    generating -= 1
+                    self.finished_sequences[tuple(cmd_list.sequence)] = sum_logprobs[idx].item()
                     continue
 
                 next_tokens = cmd_list.next_tokens()
-                if len(next_tokens) == 0:
-                    generating -= 1
+
+                if cmd_list.complete:
+                    self.finished_sequences[tuple(cmd_list.sequence)] = sum_logprobs[idx].item()
                     continue
                 
                 mask = torch.empty_like(logits[i]).fill_(-np.inf)
@@ -271,47 +267,18 @@ class BeamSearchDecoder(TokenDecoder):
 
             beam_sequences = beam_sequences[:self.beam_size]
 
+            sum_logprobs = torch.tensor([x[1] for x in beam_sequences])
+            new_tokens = torch.tensor([x[0] for x in beam_sequences])
+
+            for i in range(new_tokens.shape[0]):
+                print ("".join([self.token_generator.tokenizer.vocab[t.item()] for t in new_tokens[i]]))
             
-            print (beam_sequences)
-                
-            assert False
-
-            print (f"{choice_probs=}")
-            print ("".join([cmd_list.tokenizer.vocab[t] for t in cmd_list.sequence]))
-            print ([cmd_list.tokenizer.vocab[t] for t in next_tokens])
-        assert False
-
-        for i,batch in enumerate(batches):
-            new_cls = {}
-            for cmdlist, sum_logprob in batch:
-                try:
-                    valid_tokens = next(cmdlist.valid_tokens())
-                except StopIteration:
-                    new_cls[cmdlist] = sum_logprob
-                    continue
-                mask = torch.empty_like(logits).fill_(-np.inf)
-                mask[:, valid_tokens] = 0.0
-                choice_logits = logits[i] + mask
-                choice_probs = F.softmax(choice_logits, dim=-1)
-                assert choice_probs.shape[0] == self.beam_size, f"{choice_probs.shape=}"
-                for prob, j in zip(*choice_probs[0].topk(self.beam_size, dim=-1)):
-                    token = j.item()
-                    if prob > 0.0:
-                        new_cl = copy_commands_list(cmdlist)
-                        new_cl.add_token(token)
-                        new_cls[new_cl] = sum_logprob + logprobs[i, token]
-            new_cls = [(k, v) for k, v in new_cls.items()]
-            new_cls = sorted(new_cls, key=lambda x: x[1], reverse=True)
-            if len(new_cls) > self.beam_size:
-                new_cls = new_cls[:self.beam_size]
-            for cls,_ in new_cls:
-                completed.append(cls.complete)
-            new_batches.append(new_cls)
-
-        print (f"{len(new_batches)=}")
-        print ([cmlst[0].sequence for batch in new_batches for cmlst in batch ])
-        print (tokens)
-        return new_batches, all(completed)
+            complete = False
+            if len(list(self.finished_sequences.keys())) == tokens.shape[0]:
+                complete = True
+            print (new_tokens.shape, sum_logprobs.shape, complete)
+            print (sum_logprobs)
+            return new_tokens, sum_logprobs, complete
 
 
 def decoder_options_factory(**kwargs) -> Callable:
@@ -383,8 +350,9 @@ class DecodingTask:
 
         if self.options.decoder == BeamSearchDecoder:
             self.options.decoder_options['inference'] = self.inference
+            self.options.decoder_options['beam_size'] = options.n_groups
         self.decoder = self.options.decoder(**self.options.decoder_options)
-
+        print (f"{options.n_groups=}")
         self.n_groups = options.n_groups
 
     def _get_initial_tokens(self) -> tuple[int]:
@@ -410,7 +378,7 @@ class DecodingTask:
 
                 logits = logits[:, -1]
 
-                batches, completed = self.decoder.update(tokens, logits, sum_logprobs)
+                tokens, sum_logprobs, completed = self.decoder.update(tokens, logits, sum_logprobs)
 
                 if completed:
                     break
@@ -418,7 +386,6 @@ class DecodingTask:
         finally:
             self.inference.cleanup_caching()
 
-        print (batches)
         assert False
         return tokens
 
