@@ -6,6 +6,7 @@ import gzip
 import torch
 from torch import nn, Tensor
 import torch.nn.functional as F
+
 import numpy as np
 
 from .decoding import decode_function
@@ -107,6 +108,7 @@ class ResidualAttentionBlock(nn.Module):
         mask: Optional[Tensor] = None,
         kv_cache: Optional[dict] = None,
     ):
+
         x = x + self.attn(self.attn_ln(x), mask=mask, kv_cache=kv_cache)[0]
         if self.cross_attn and self.cross_attn_ln:
             x = x + self.cross_attn(self.cross_attn_ln(x), xa, kv_cache=kv_cache)[0]
@@ -128,6 +130,7 @@ class Decoder(nn.Module):
 
         self.token_embedding = nn.Embedding(n_vocab, n_state)
         self.positional_embedding = nn.Parameter(torch.empty(n_ctx, n_state))
+        nn.init.xavier_normal_(self.positional_embedding)
 
         self.blocks: Iterable[ResidualAttentionBlock] = nn.ModuleList(
             [
@@ -150,11 +153,13 @@ class Decoder(nn.Module):
         xa : torch.Tensor, shape = (batch_size, n_mels, n_audio_ctx)
             the encoded audio features to be attended on
         """
+        
         offset = next(iter(kv_cache.values())).shape[1] if kv_cache else 0
         x = (
             self.token_embedding(x)
             + self.positional_embedding[offset : offset + x.shape[-1]]
         )
+        
         x = x.to(xa.dtype)
 
         for block in self.blocks:

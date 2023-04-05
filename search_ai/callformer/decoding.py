@@ -40,7 +40,6 @@ class PyTorchInference(Inference):
 
     def logits(self, tokens: Tensor, embedding: Tensor) -> Tensor:
         if not self.kv_cache:
-            print ("creating kv_cache")
             self.kv_cache, self.hooks = self.model.install_kv_cache_hooks()
 
         if tokens.shape[-1] > self.initial_token_length:
@@ -302,8 +301,6 @@ class BeamSearchDecoder(TokenDecoder):
 
         n_batches = tokens.shape[0] // self.beam_size
 
-        batch_sequences, batch_sum_logprobs = [], []
-
         new_tokens = torch.empty((tokens.shape[0], tokens.shape[1]+1), dtype=torch.long)
         new_sumlogprobs = torch.empty_like(sum_logprobs)
 
@@ -321,6 +318,8 @@ class BeamSearchDecoder(TokenDecoder):
         return new_tokens, new_sumlogprobs, complete
 
     def finalize(self, tokens: Tensor, sum_logprobs: Tensor):
+        if len(self.finished_sequences) == 0:
+            self.finished_sequences[tuple(tokens[0].tolist())] = sum_logprobs[0].item()
         sequence = sorted([(k,v) for k,v in self.finished_sequences.items()],
                key=lambda x: x[1],)[0]
         self.reset()
@@ -426,14 +425,12 @@ class DecodingTask:
 
                 if completed:
                     break
-
+            
         finally:
             self.inference.cleanup_caching()
         
         return tokens, sum_logprobs
 
-
-    @torch.no_grad()
     def run(
             self, 
             embedding: Tensor,
@@ -444,14 +441,13 @@ class DecodingTask:
         tokens: Tensor = torch.tensor([self.initial_tokens] * n_batches, device=embedding.device)
         tokens = tokens.repeat_interleave(self.n_groups, dim=0)
         embedding = embedding.repeat_interleave(self.n_groups, dim=0)
-        
+
         tokens, sum_logprobs = self._main_loop(embedding, tokens)
         tokens = self.decoder.finalize(tokens, sum_logprobs)
         return tokens
 
 
 
-@torch.no_grad()
 def decode_function(
     model: "CallFormer",
     embedding: Tensor,
@@ -468,7 +464,7 @@ def decode_function(
     if kwargs:
         options = replace(options, **kwargs)
     
-    with torch.no_grad():
+    with torch.inference_mode():
         result = DecodingTask(model, options).run(embedding)
 
     return result
